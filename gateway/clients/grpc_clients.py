@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from functools import wraps
 from typing import Optional
 
@@ -55,35 +55,27 @@ from services.research_service.models import (
 )
 from services.roadmap_service.models import RoadmapItemModel
 from services.user_service.models import UserModel
-from shared.exceptions import (
-    AuthenticationError,
-    AuthorizationError,
-    BusinessRuleError,
-    EntityNotFoundError,
-    ServiceError,
-    ValidationError,
-)
+from shared.cache import RedisCache
+from shared.resilience import RetryPolicy, execute_with_retry
+
+
+class _TimeoutInterceptor(grpc.UnaryUnaryClientInterceptor):
+    def __init__(self, timeout_seconds: float) -> None:
+        self._timeout = timeout_seconds
+
+    def intercept_unary_unary(self, continuation, client_call_details, request):
+        if client_call_details.timeout is None:
+            client_call_details = client_call_details._replace(timeout=self._timeout)
+        return continuation(client_call_details, request)
 
 
 def _rpc_guard(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        try:
-            return fn(*args, **kwargs)
-        except grpc.RpcError as exc:
-            code = exc.code()
-            detail = exc.details() or "Ошибка gRPC-вызова"
-            if code == grpc.StatusCode.NOT_FOUND:
-                raise EntityNotFoundError("Объект", detail) from exc
-            if code == grpc.StatusCode.INVALID_ARGUMENT:
-                raise ValidationError(detail) from exc
-            if code == grpc.StatusCode.FAILED_PRECONDITION:
-                raise BusinessRuleError(detail) from exc
-            if code == grpc.StatusCode.UNAUTHENTICATED:
-                raise AuthenticationError(detail) from exc
-            if code == grpc.StatusCode.PERMISSION_DENIED:
-                raise AuthorizationError(detail) from exc
-            raise ServiceError(f"gRPC ошибка ({code}): {detail}") from exc
+        policy = getattr(args[0], "_policy", RetryPolicy()) if args else RetryPolicy()
+        return execute_with_retry(
+            fn.__qualname__, policy, lambda _t: fn(*args, **kwargs)
+        )
 
     return wrapper
 
@@ -148,8 +140,15 @@ def _proto_to_backlog(p: platform_pb2.BacklogTaskProto) -> Optional[BacklogTaskM
 
 
 class GrpcHypothesisClient(HypothesisClient):
-    def __init__(self, channel: grpc.Channel) -> None:
+    def __init__(
+        self,
+        channel: grpc.Channel,
+        cache: Optional[RedisCache] = None,
+        policy: Optional[RetryPolicy] = None,
+    ) -> None:
         self._stub = platform_pb2_grpc.HypothesisServiceStub(channel)
+        self._cache = cache
+        self._policy = policy or RetryPolicy()
 
     @_rpc_guard
     def get_hypothesis(self, hypothesis_id: str) -> HypothesisModel:
@@ -186,8 +185,21 @@ class GrpcHypothesisClient(HypothesisClient):
 
     @_rpc_guard
     def get_summary(self, product_id: Optional[str] = None) -> HypothesesSummaryModel:
+        cache_key = f"cache:summary:{product_id or 'all'}"
+        if self._cache is not None:
+            cached = self._cache.get_json(cache_key)
+            if cached is not None:
+                return HypothesesSummaryModel(
+                    total_count=cached["total_count"],
+                    by_status=[StatusCountModel(**x) for x in cached["by_status"]],
+                    by_priority=[PriorityCountModel(**x) for x in cached["by_priority"]],
+                    avg_rice_score=cached["avg_rice_score"],
+                    max_rice_score=cached["max_rice_score"],
+                    confirmed_rate=cached["confirmed_rate"],
+                    in_backlog_count=cached["in_backlog_count"],
+                )
         s = self._stub.GetSummary(platform_pb2.GetSummaryRequest(product_id=product_id or ""))
-        return HypothesesSummaryModel(
+        result = HypothesesSummaryModel(
             total_count=s.total_count,
             by_status=[StatusCountModel(status=x.status, count=x.count) for x in s.by_status],
             by_priority=[PriorityCountModel(priority=x.priority, count=x.count) for x in s.by_priority],
@@ -196,6 +208,9 @@ class GrpcHypothesisClient(HypothesisClient):
             confirmed_rate=s.confirmed_rate,
             in_backlog_count=s.in_backlog_count,
         )
+        if self._cache is not None:
+            self._cache.set_json(cache_key, asdict(result))
+        return result
 
     @_rpc_guard
     def get_template(self, hypothesis_id: str) -> Optional[HypothesisTemplateModel]:
@@ -586,19 +601,31 @@ class GrpcRoadmapClient(RoadmapClient):
 
 
 class GrpcAnalyticsClient(AnalyticsClient):
-    def __init__(self, channel: grpc.Channel) -> None:
+    def __init__(
+        self,
+        channel: grpc.Channel,
+        cache: Optional[RedisCache] = None,
+        policy: Optional[RetryPolicy] = None,
+    ) -> None:
         self._stub = platform_pb2_grpc.AnalyticsServiceStub(channel)
+        self._cache = cache
+        self._policy = policy or RetryPolicy()
 
     @_rpc_guard
     def get_dashboard_metrics(
         self, product_id: Optional[str] = None, period: Optional[str] = None
     ) -> list[DashboardMetricModel]:
+        cache_key = f"cache:metrics:{product_id or 'all'}:{period or 'all'}"
+        if self._cache is not None:
+            cached = self._cache.get_json(cache_key)
+            if cached is not None:
+                return [DashboardMetricModel(**m) for m in cached]
         resp = self._stub.GetDashboardMetrics(
             platform_pb2.GetDashboardMetricsRequest(
                 product_id=product_id or "", period=period or ""
             )
         )
-        return [
+        items = [
             DashboardMetricModel(
                 id=m.id,
                 metric_type=m.metric_type,
@@ -608,16 +635,31 @@ class GrpcAnalyticsClient(AnalyticsClient):
             )
             for m in resp.items
         ]
+        if self._cache is not None:
+            self._cache.set_json(cache_key, [asdict(m) for m in items])
+        return items
 
 
 class GrpcProductClient(ProductClient):
-    def __init__(self, channel: grpc.Channel) -> None:
+    def __init__(
+        self,
+        channel: grpc.Channel,
+        cache: Optional[RedisCache] = None,
+        policy: Optional[RetryPolicy] = None,
+    ) -> None:
         self._stub = platform_pb2_grpc.ProductServiceStub(channel)
+        self._cache = cache
+        self._policy = policy or RetryPolicy()
 
     @_rpc_guard
     def get_product(self, product_id: str) -> ProductModel:
+        cache_key = f"cache:product:{product_id}"
+        if self._cache is not None:
+            cached = self._cache.get_json(cache_key)
+            if cached is not None:
+                return ProductModel(**cached)
         p = self._stub.GetProduct(platform_pb2.GetProductRequest(product_id=product_id))
-        return ProductModel(
+        model = ProductModel(
             id=p.id,
             name=p.name,
             category=p.category,
@@ -625,11 +667,19 @@ class GrpcProductClient(ProductClient):
             description=p.description or None,
             owner_id=p.owner_id,
         )
+        if self._cache is not None:
+            self._cache.set_json(cache_key, asdict(model))
+        return model
 
     @_rpc_guard
     def list_products(self) -> list[ProductModel]:
+        cache_key = "cache:products:all"
+        if self._cache is not None:
+            cached = self._cache.get_json(cache_key)
+            if cached is not None:
+                return [ProductModel(**p) for p in cached]
         resp = self._stub.ListProducts(platform_pb2.Empty())
-        return [
+        items = [
             ProductModel(
                 id=p.id,
                 name=p.name,
@@ -640,6 +690,9 @@ class GrpcProductClient(ProductClient):
             )
             for p in resp.items
         ]
+        if self._cache is not None:
+            self._cache.set_json(cache_key, [asdict(p) for p in items])
+        return items
 
     @_rpc_guard
     def list_teams(self, product_id: Optional[str] = None) -> list[TeamModel]:
@@ -959,6 +1012,8 @@ class ServiceClients:
     grpc_server: grpc.Server
     grpc_channel: grpc.Channel
     registry: ServiceRegistry
+    cache: RedisCache
+    retry_policy: RetryPolicy
 
     def shutdown(self) -> None:
         self.kafka_producer.close()
@@ -970,22 +1025,26 @@ def build_grpc_clients(
     redis_client=None,
     session_ttl_seconds: Optional[int] = None,
     port: int = 0,
+    retry_policy: Optional[RetryPolicy] = None,
 ) -> ServiceClients:
-    """Запускает gRPC-сервер, подключает Kafka Consumer/Producer и возвращает gRPC-клиенты."""
+    """Запускает gRPC-сервер, подключает Kafka, Redis-кеш, timeout/retry и возвращает gRPC-клиенты."""
+    policy = retry_policy or RetryPolicy()
     server, bound_port, registry = start_grpc_server(
         port=port, redis_client=redis_client, session_ttl_seconds=session_ttl_seconds
     )
+    cache = RedisCache(registry.redis_client, default_ttl_seconds=300)
     producer = KafkaEventProducer()
-    consumer = register_platform_consumers(registry, producer.broker)
-    channel = grpc.insecure_channel(f"127.0.0.1:{bound_port}")
+    consumer = register_platform_consumers(registry, producer.broker, cache=cache)
+    raw_channel = grpc.insecure_channel(f"127.0.0.1:{bound_port}")
+    channel = grpc.intercept_channel(raw_channel, _TimeoutInterceptor(policy.timeout_seconds))
 
     return ServiceClients(
-        hypothesis=GrpcHypothesisClient(channel),
+        hypothesis=GrpcHypothesisClient(channel, cache=cache, policy=policy),
         research=GrpcResearchClient(channel),
         report=GrpcReportClient(channel),
         roadmap=GrpcRoadmapClient(channel),
-        analytics=GrpcAnalyticsClient(channel),
-        product=GrpcProductClient(channel),
+        analytics=GrpcAnalyticsClient(channel, cache=cache, policy=policy),
+        product=GrpcProductClient(channel, cache=cache, policy=policy),
         user=GrpcUserClient(channel),
         notification=GrpcNotificationClient(channel),
         idea_portal=GrpcIdeaPortalClient(channel),
@@ -997,6 +1056,8 @@ def build_grpc_clients(
         kafka_producer=producer,
         kafka_consumer=consumer,
         grpc_server=server,
-        grpc_channel=channel,
+        grpc_channel=raw_channel,
         registry=registry,
+        cache=cache,
+        retry_policy=policy,
     )

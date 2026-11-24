@@ -28,3 +28,7 @@ class AuthenticationError(ServiceError):
 
 class AuthorizationError(ServiceError):
     """Недостаточно прав для выполнения операции."""
+
+
+class ServiceUnavailableError(ServiceError):
+    """Временная недоступность сервиса или превышение timeout."""

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from concurrent import futures
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 import grpc
 
@@ -88,6 +88,7 @@ class ServiceRegistry:
     audit: AuditService
     integration: IntegrationService
     auth: AuthService
+    redis_client: Any
 
 
 class HypothesisServicer(platform_pb2_grpc.HypothesisServiceServicer):
@@ -794,6 +795,7 @@ def build_service_registry(
         audit=AuditService(aud_repo),
         integration=IntegrationService(intg_repo),
         auth=AuthService(auth_repo, session_store, config=auth_cfg),
+        redis_client=r_client,
     )
 
 

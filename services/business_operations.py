@@ -25,6 +25,9 @@ from services.report_service.models import ReportModel
 from services.research_service.models import InsightModel, ResearchModel, ResearchNoteModel
 from services.roadmap_service.models import RoadmapItemModel
 from shared.exceptions import BusinessRuleError
+from shared.logging_config import get_platform_logger
+
+_log = get_platform_logger("pdp.business")
 
 
 class BusinessOperations:
@@ -44,6 +47,7 @@ class BusinessOperations:
         then_result: str,
         because_assumption: str,
     ) -> HypothesisModel:
+        _log.info("BIZ START create_hypothesis product_id=%s owner_id=%s", product_id, owner_id)
         self._clients.user.check_permission(owner_id, "CREATE_HYPOTHESIS")
         product = self._clients.product.get_product(product_id)
         hypothesis = self._clients.hypothesis.create_hypothesis(
@@ -67,6 +71,7 @@ class BusinessOperations:
                 "priority": hypothesis.priority,
             },
         )
+        _log.info("BIZ OK create_hypothesis hypothesis_id=%s", hypothesis.id)
         return hypothesis
 
     def calculate_rice(
@@ -139,13 +144,17 @@ class BusinessOperations:
         return updated
 
     def export_to_backlog(self, hypothesis_id: str, user_id: str) -> BacklogTaskModel:
+        _log.info("BIZ START export_to_backlog hypothesis_id=%s user_id=%s", hypothesis_id, user_id)
         self._clients.user.check_permission(user_id, "EXPORT_TO_BACKLOG")
         hypothesis = self._clients.hypothesis.begin_export(hypothesis_id)
         try:
             task = self._clients.integration.create_external_task(
                 hypothesis_id=hypothesis.id, idempotency_key=hypothesis.id
             )
-        except Exception:
+        except Exception as exc:
+            _log.error(
+                "BIZ ROLLBACK export_to_backlog hypothesis_id=%s error=%s", hypothesis_id, exc
+            )
             self._clients.hypothesis.rollback_export(hypothesis_id)
             raise
         self._clients.hypothesis.complete_export(hypothesis_id)

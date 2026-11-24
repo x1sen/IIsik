@@ -29,7 +29,11 @@ def create_app(clients: ServiceClients | None = None) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok", "mode": "grpc+kafka"}
+        return {
+            "status": "ok",
+            "mode": "grpc+kafka",
+            "resilience": "timeout+retry+redis-cache",
+        }
 
     return app
 

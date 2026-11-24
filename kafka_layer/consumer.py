@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Optional
 
 from grpc_layer.server import ServiceRegistry
 from kafka_layer.events import (
@@ -21,25 +21,57 @@ from kafka_layer.events import (
     deserialize_envelope,
 )
 from kafka_layer.producer import LocalKafkaBroker
+from shared.cache import RedisCache
+from shared.logging_config import get_platform_logger
+
+_log = get_platform_logger("pdp.kafka.consumer")
 
 
 class KafkaEventConsumer:
-    """Потребитель событий Kafka, десериализующий payload и вызывающий обработчик сервиса."""
+    """Потребитель событий Kafka с логированием, обработкой ошибок и DLQ."""
 
     def __init__(self, broker: LocalKafkaBroker) -> None:
         self._broker = broker
 
     def register(self, topic: str, handler: Callable[[KafkaEventEnvelope], None]) -> None:
         def _on_message(raw: bytes) -> None:
-            envelope = deserialize_envelope(raw)
-            handler(envelope)
+            try:
+                envelope = deserialize_envelope(raw)
+            except Exception as exc:
+                _log.error("KAFKA DESERIALIZE ERROR topic=%s error=%s", topic, exc)
+                self._broker.dead_letter_queue.append(
+                    {"topic": topic, "raw": raw.decode("utf-8", errors="replace"), "error": str(exc)}
+                )
+                return
+            try:
+                handler(envelope)
+                _log.info("KAFKA CONSUME OK topic=%s event_id=%s", topic, envelope.event_id)
+            except Exception as exc:
+                _log.error(
+                    "KAFKA CONSUME ERROR topic=%s event_id=%s error=%s",
+                    topic,
+                    envelope.event_id,
+                    exc,
+                )
+                self._broker.dead_letter_queue.append(
+                    {"topic": topic, "event_id": envelope.event_id, "error": str(exc)}
+                )
 
         self._broker.subscribe(topic, _on_message)
 
 
-def register_platform_consumers(registry: ServiceRegistry, broker: LocalKafkaBroker) -> KafkaEventConsumer:
-    """Подписывает Analytics, Roadmap, Notification и Audit сервисы на события Kafka."""
+def register_platform_consumers(
+    registry: ServiceRegistry,
+    broker: LocalKafkaBroker,
+    cache: Optional[RedisCache] = None,
+) -> KafkaEventConsumer:
+    """Подписывает сервисы на события Kafka и инвалидирует кеш Redis при изменениях."""
     consumer = KafkaEventConsumer(broker)
+
+    def _invalidate_analytics_cache() -> None:
+        if cache is not None:
+            cache.invalidate_prefix("cache:metrics:")
+            cache.invalidate_prefix("cache:summary:")
 
     def on_hypothesis_created(env: KafkaEventEnvelope) -> None:
         p = env.payload
@@ -60,6 +92,7 @@ def register_platform_consumers(registry: ServiceRegistry, broker: LocalKafkaBro
             entity_type="HYPOTHESIS",
             entity_id=p["hypothesis_id"],
         )
+        _invalidate_analytics_cache()
 
     def on_hypothesis_prioritized(env: KafkaEventEnvelope) -> None:
         p = env.payload
@@ -78,6 +111,7 @@ def register_platform_consumers(registry: ServiceRegistry, broker: LocalKafkaBro
             None,
             f"RICE={p['rice_score']}",
         )
+        _invalidate_analytics_cache()
 
     def on_hypothesis_validated(env: KafkaEventEnvelope) -> None:
         p = env.payload
@@ -102,6 +136,7 @@ def register_platform_consumers(registry: ServiceRegistry, broker: LocalKafkaBro
             entity_type="HYPOTHESIS",
             entity_id=p["hypothesis_id"],
         )
+        _invalidate_analytics_cache()
 
     def on_hypothesis_exported(env: KafkaEventEnvelope) -> None:
         p = env.payload
@@ -114,6 +149,7 @@ def register_platform_consumers(registry: ServiceRegistry, broker: LocalKafkaBro
         registry.audit.record_action(
             "HYPOTHESIS", p["hypothesis_id"], p["exported_by"], "EXPORTED", "CONFIRMED", "IN_BACKLOG"
         )
+        _invalidate_analytics_cache()
 
     def on_backlog_task_created(env: KafkaEventEnvelope) -> None:
         p = env.payload
