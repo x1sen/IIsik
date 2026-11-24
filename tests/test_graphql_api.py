@@ -6,20 +6,22 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import create_app
-from gateway.clients.mocks import build_mock_clients
+from gateway.clients.grpc_clients import build_grpc_clients
 
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("PDP_DATA_DIR", str(tmp_path))
-    app = create_app(clients=build_mock_clients())
+    clients = build_grpc_clients()
+    app = create_app(clients=clients)
     tc = TestClient(app)
     login_resp = tc.post(
         "/auth/login", json={"email": "orlova@bank.local", "password": "admin_pass123"}
     )
     assert login_resp.status_code == 200
     tc.headers["Authorization"] = f"Bearer {login_resp.json()['access_token']}"
-    return tc
+    yield tc
+    clients.shutdown()
 
 
 def test_health_endpoint(client: TestClient):

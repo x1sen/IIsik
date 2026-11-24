@@ -1,10 +1,23 @@
-"""Координатор бизнес-операций сервисного слоя (взаимодействие строго через абстракции клиентов)."""
+"""Координатор бизнес-операций: синхронные gRPC-вызовы и публикация событий в Kafka."""
 
 from __future__ import annotations
 
 from typing import Optional
 
-from gateway.clients.mocks import ServiceClients
+from gateway.clients.grpc_clients import ServiceClients
+from kafka_layer.events import (
+    TOPIC_BACKLOG_TASK_CREATED,
+    TOPIC_COMMENT_ADDED,
+    TOPIC_HYPOTHESIS_CREATED,
+    TOPIC_HYPOTHESIS_EXPORTED,
+    TOPIC_HYPOTHESIS_PRIORITIZED,
+    TOPIC_HYPOTHESIS_VALIDATED,
+    TOPIC_IDEA_SUBMITTED,
+    TOPIC_REPORT_READY,
+    TOPIC_RESEARCH_COMPLETED,
+    TOPIC_RESEARCH_CREATED,
+    TOPIC_ROADMAP_ITEM_CREATED,
+)
 from services.hypothesis_service.models import CommentModel, HypothesisModel, RICEScoreModel
 from services.idea_portal_service.models import IdeaModel
 from services.integration_service.models import BacklogTaskModel
@@ -15,7 +28,7 @@ from shared.exceptions import BusinessRuleError
 
 
 class BusinessOperations:
-    """Реализация сквозных бизнес-операций поверх клиентских интерфейсов сервисов."""
+    """Реализация сквозных бизнес-сценариев через gRPC-клиенты и Kafka Producer."""
 
     def __init__(self, clients: ServiceClients) -> None:
         self._clients = clients
@@ -43,14 +56,16 @@ class BusinessOperations:
             then_result=then_result,
             because_assumption=because_assumption,
         )
-        self._clients.audit.record_action(
-            "HYPOTHESIS", hypothesis.id, owner_id, "CREATED", None, hypothesis.status
-        )
-        self._clients.notification.create_notification(
-            user_id=product.owner_id,
-            message=f"Создана новая гипотеза: {hypothesis.title}",
-            entity_type="HYPOTHESIS",
-            entity_id=hypothesis.id,
+        self._clients.kafka_producer.publish(
+            TOPIC_HYPOTHESIS_CREATED,
+            {
+                "hypothesis_id": hypothesis.id,
+                "title": hypothesis.title,
+                "product_id": product.id,
+                "owner_id": owner_id,
+                "notify_user_id": product.owner_id,
+                "priority": hypothesis.priority,
+            },
         )
         return hypothesis
 
@@ -64,6 +79,7 @@ class BusinessOperations:
         user_id: str,
     ) -> RICEScoreModel:
         self._clients.user.check_permission(user_id, "CALCULATE_RICE")
+        hypothesis = self._clients.hypothesis.get_hypothesis(hypothesis_id)
         score = self._clients.hypothesis.calculate_rice(
             hypothesis_id=hypothesis_id,
             reach=reach,
@@ -71,13 +87,15 @@ class BusinessOperations:
             confidence=confidence,
             effort=effort,
         )
-        self._clients.audit.record_action(
-            "HYPOTHESIS",
-            hypothesis_id,
-            user_id,
-            "PRIORITIZED",
-            None,
-            f"RICE={score.calculated_score}",
+        self._clients.kafka_producer.publish(
+            TOPIC_HYPOTHESIS_PRIORITIZED,
+            {
+                "hypothesis_id": hypothesis_id,
+                "product_id": hypothesis.product_id,
+                "priority": hypothesis.priority,
+                "rice_score": score.calculated_score,
+                "user_id": user_id,
+            },
         )
         return score
 
@@ -105,14 +123,18 @@ class BusinessOperations:
         old_hyp = self._clients.hypothesis.get_hypothesis(hypothesis_id)
         updated = self._clients.hypothesis.apply_research_result(hypothesis_id, target_status)
         self._clients.research.mark_completed(research_id)
-        self._clients.audit.record_action(
-            "HYPOTHESIS", hypothesis_id, user_id, "VALIDATED", old_hyp.status, updated.status
-        )
-        self._clients.notification.create_notification(
-            user_id=updated.owner_id,
-            message=f"Гипотеза '{updated.title}' переведена в статус {updated.status} по итогам исследования",
-            entity_type="HYPOTHESIS",
-            entity_id=updated.id,
+        self._clients.kafka_producer.publish(
+            TOPIC_HYPOTHESIS_VALIDATED,
+            {
+                "hypothesis_id": updated.id,
+                "title": updated.title,
+                "product_id": updated.product_id,
+                "owner_id": updated.owner_id,
+                "priority": updated.priority,
+                "old_status": old_hyp.status,
+                "new_status": updated.status,
+                "user_id": user_id,
+            },
         )
         return updated
 
@@ -127,14 +149,27 @@ class BusinessOperations:
             self._clients.hypothesis.rollback_export(hypothesis_id)
             raise
         self._clients.hypothesis.complete_export(hypothesis_id)
-        self._clients.audit.record_action(
-            "HYPOTHESIS", hypothesis.id, user_id, "EXPORTED", "CONFIRMED", "IN_BACKLOG"
+        self._clients.kafka_producer.publish(
+            TOPIC_BACKLOG_TASK_CREATED,
+            {
+                "backlog_task_id": task.id,
+                "hypothesis_id": hypothesis.id,
+                "title": hypothesis.title,
+                "product_id": hypothesis.product_id,
+                "owner_id": hypothesis.owner_id,
+                "external_key": task.external_key,
+                "external_url": task.external_url,
+            },
         )
-        self._clients.notification.create_notification(
-            user_id=hypothesis.owner_id,
-            message=f"Гипотеза '{hypothesis.title}' экспортирована в бэклог ({task.external_key})",
-            entity_type="HYPOTHESIS",
-            entity_id=hypothesis.id,
+        self._clients.kafka_producer.publish(
+            TOPIC_HYPOTHESIS_EXPORTED,
+            {
+                "hypothesis_id": hypothesis.id,
+                "product_id": hypothesis.product_id,
+                "owner_id": hypothesis.owner_id,
+                "external_key": task.external_key,
+                "exported_by": user_id,
+            },
         )
         return task
 
@@ -152,7 +187,7 @@ class BusinessOperations:
         success_criteria: str,
         user_stories: Optional[str] = None,
     ) -> ResearchModel:
-        self._clients.hypothesis.get_hypothesis(hypothesis_id)
+        hypothesis = self._clients.hypothesis.get_hypothesis(hypothesis_id)
         self._clients.user.check_permission(assignee_id, "CREATE_RESEARCH")
         research = self._clients.research.create_research(
             hypothesis_id=hypothesis_id,
@@ -167,14 +202,15 @@ class BusinessOperations:
             success_criteria=success_criteria,
             user_stories=user_stories,
         )
-        self._clients.audit.record_action(
-            "RESEARCH", research.id, assignee_id, "CREATED", None, research.status
-        )
-        self._clients.notification.create_notification(
-            user_id=assignee_id,
-            message=f"Назначено новое исследование: {research.title}",
-            entity_type="RESEARCH",
-            entity_id=research.id,
+        self._clients.kafka_producer.publish(
+            TOPIC_RESEARCH_CREATED,
+            {
+                "research_id": research.id,
+                "title": research.title,
+                "hypothesis_id": hypothesis.id,
+                "product_id": hypothesis.product_id,
+                "assignee_id": assignee_id,
+            },
         )
         return research
 
@@ -204,14 +240,29 @@ class BusinessOperations:
         )
         self._clients.research.complete_research(research_id)
         hypothesis = self._clients.hypothesis.get_hypothesis(research.hypothesis_id)
-        self._clients.audit.record_action(
-            "REPORT", report.id, author_id, "PUBLISHED", None, report.conclusion
+        self._clients.kafka_producer.publish(
+            TOPIC_RESEARCH_COMPLETED,
+            {
+                "research_id": research.id,
+                "hypothesis_id": hypothesis.id,
+                "product_id": hypothesis.product_id,
+                "report_id": report.id,
+                "conclusion": report.conclusion,
+                "author_id": author_id,
+            },
         )
-        self._clients.notification.create_notification(
-            user_id=hypothesis.owner_id,
-            message=f"Опубликован отчёт по исследованию '{research.title}'",
-            entity_type="REPORT",
-            entity_id=report.id,
+        self._clients.kafka_producer.publish(
+            TOPIC_REPORT_READY,
+            {
+                "report_id": report.id,
+                "research_id": research.id,
+                "research_title": research.title,
+                "hypothesis_id": hypothesis.id,
+                "product_id": hypothesis.product_id,
+                "owner_id": hypothesis.owner_id,
+                "conclusion": report.conclusion,
+                "author_id": author_id,
+            },
         )
         return report
 
@@ -233,14 +284,17 @@ class BusinessOperations:
             dependencies=dependencies,
             assignee_id=assignee_id,
         )
-        self._clients.audit.record_action(
-            "ROADMAP", item.id, assignee_id, "SCHEDULED", None, f"{start_date}..{end_date}"
-        )
-        self._clients.notification.create_notification(
-            user_id=assignee_id,
-            message=f"Гипотеза '{hypothesis.title}' запланирована на дорожной карте ({start_date} – {end_date})",
-            entity_type="HYPOTHESIS",
-            entity_id=hypothesis.id,
+        self._clients.kafka_producer.publish(
+            TOPIC_ROADMAP_ITEM_CREATED,
+            {
+                "roadmap_item_id": item.id,
+                "hypothesis_id": hypothesis.id,
+                "title": hypothesis.title,
+                "product_id": hypothesis.product_id,
+                "start_date": start_date,
+                "end_date": end_date,
+                "assignee_id": assignee_id,
+            },
         )
         return item
 
@@ -280,14 +334,16 @@ class BusinessOperations:
             author_name=author_name,
             hypothesis_id=hypothesis.id,
         )
-        self._clients.audit.record_action(
-            "IDEA", idea.id, resolved_owner, "SUBMITTED", None, hypothesis.id
-        )
-        self._clients.notification.create_notification(
-            user_id=product.owner_id,
-            message=f"Поступила новая идея '{idea.title}', создана гипотеза {hypothesis.id}",
-            entity_type="HYPOTHESIS",
-            entity_id=hypothesis.id,
+        self._clients.kafka_producer.publish(
+            TOPIC_IDEA_SUBMITTED,
+            {
+                "idea_id": idea.id,
+                "title": idea.title,
+                "hypothesis_id": hypothesis.id,
+                "product_id": product.id,
+                "owner_id": resolved_owner,
+                "notify_user_id": product.owner_id,
+            },
         )
         return idea
 
@@ -298,7 +354,13 @@ class BusinessOperations:
         comment = self._clients.hypothesis.add_comment(
             entity_type=entity_type, entity_id=entity_id, author_id=author_id, text=text
         )
-        self._clients.audit.record_action(
-            entity_type, entity_id, author_id, "COMMENTED", None, comment.id
+        self._clients.kafka_producer.publish(
+            TOPIC_COMMENT_ADDED,
+            {
+                "comment_id": comment.id,
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "author_id": author_id,
+            },
         )
         return comment

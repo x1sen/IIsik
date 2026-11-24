@@ -1,0 +1,592 @@
+syntax = "proto3";
+
+package pdp;
+
+message Empty {}
+
+message HypothesisProto {
+  string id = 1;
+  string title = 2;
+  string description = 3;
+  string status = 4;
+  string priority = 5;
+  bool has_rice_score = 6;
+  double rice_score = 7;
+  string product_id = 8;
+  string owner_id = 9;
+  string created_at = 10;
+}
+
+message HypothesisListProto {
+  repeated HypothesisProto items = 1;
+}
+
+message GetHypothesisRequest {
+  string hypothesis_id = 1;
+}
+
+message ListHypothesesRequest {
+  string product_id = 1;
+  string status = 2;
+  string priority = 3;
+  string owner_id = 4;
+  bool has_min_rice_score = 5;
+  double min_rice_score = 6;
+  string search = 7;
+  string sort_by = 8;
+  string sort_dir = 9;
+}
+
+message GetSummaryRequest {
+  string product_id = 1;
+}
+
+message StatusCountProto {
+  string status = 1;
+  int32 count = 2;
+}
+
+message PriorityCountProto {
+  string priority = 1;
+  int32 count = 2;
+}
+
+message HypothesesSummaryProto {
+  int32 total_count = 1;
+  repeated StatusCountProto by_status = 2;
+  repeated PriorityCountProto by_priority = 3;
+  bool has_avg_rice_score = 4;
+  double avg_rice_score = 5;
+  bool has_max_rice_score = 6;
+  double max_rice_score = 7;
+  double confirmed_rate = 8;
+  int32 in_backlog_count = 9;
+}
+
+message HypothesisTemplateProto {
+  bool found = 1;
+  string id = 2;
+  string hypothesis_id = 3;
+  string if_action = 4;
+  string then_result = 5;
+  string because_assumption = 6;
+}
+
+message RICEScoreProto {
+  bool found = 1;
+  string id = 2;
+  string hypothesis_id = 3;
+  int32 reach = 4;
+  double impact = 5;
+  double confidence = 6;
+  int32 effort = 7;
+  double calculated_score = 8;
+}
+
+message CommentProto {
+  string id = 1;
+  string entity_type = 2;
+  string entity_id = 3;
+  string author_id = 4;
+  string text = 5;
+  string created_at = 6;
+}
+
+message CommentListProto {
+  repeated CommentProto items = 1;
+}
+
+message ListCommentsRequest {
+  string entity_type = 1;
+  string entity_id = 2;
+}
+
+message FindDuplicatesRequest {
+  string title = 1;
+  string description = 2;
+  string product_id = 3;
+}
+
+message DuplicateCandidateProto {
+  string hypothesis_id = 1;
+  string title = 2;
+  double similarity = 3;
+  string status = 4;
+}
+
+message DuplicateListProto {
+  repeated DuplicateCandidateProto items = 1;
+}
+
+message CreateHypothesisRequest {
+  string title = 1;
+  string description = 2;
+  string product_id = 3;
+  string owner_id = 4;
+  string priority = 5;
+  string if_action = 6;
+  string then_result = 7;
+  string because_assumption = 8;
+}
+
+message CalculateRICERequest {
+  string hypothesis_id = 1;
+  int32 reach = 2;
+  double impact = 3;
+  double confidence = 4;
+  int32 effort = 5;
+}
+
+message ApplyResearchResultRequest {
+  string hypothesis_id = 1;
+  string target_status = 2;
+}
+
+message AddCommentRequest {
+  string entity_type = 1;
+  string entity_id = 2;
+  string author_id = 3;
+  string text = 4;
+}
+
+service HypothesisService {
+  rpc GetHypothesis(GetHypothesisRequest) returns (HypothesisProto);
+  rpc ListHypotheses(ListHypothesesRequest) returns (HypothesisListProto);
+  rpc GetSummary(GetSummaryRequest) returns (HypothesesSummaryProto);
+  rpc GetTemplate(GetHypothesisRequest) returns (HypothesisTemplateProto);
+  rpc GetRiceScore(GetHypothesisRequest) returns (RICEScoreProto);
+  rpc ListComments(ListCommentsRequest) returns (CommentListProto);
+  rpc FindDuplicateHypotheses(FindDuplicatesRequest) returns (DuplicateListProto);
+  rpc CreateHypothesis(CreateHypothesisRequest) returns (HypothesisProto);
+  rpc CalculateRICE(CalculateRICERequest) returns (RICEScoreProto);
+  rpc ApplyResearchResult(ApplyResearchResultRequest) returns (HypothesisProto);
+  rpc BeginExport(GetHypothesisRequest) returns (HypothesisProto);
+  rpc CompleteExport(GetHypothesisRequest) returns (HypothesisProto);
+  rpc RollbackExport(GetHypothesisRequest) returns (HypothesisProto);
+  rpc AddComment(AddCommentRequest) returns (CommentProto);
+}
+
+message ResearchProto {
+  string id = 1;
+  string title = 2;
+  string status = 3;
+  string type = 4;
+  string method = 5;
+  string target_audience = 6;
+  int32 sample_size = 7;
+  string start_date = 8;
+  string end_date = 9;
+  string hypothesis_id = 10;
+  string assignee_id = 11;
+}
+
+message ResearchListProto {
+  repeated ResearchProto items = 1;
+}
+
+message GetResearchRequest {
+  string research_id = 1;
+}
+
+message ListResearchesRequest {
+  string hypothesis_id = 1;
+  string status = 2;
+  string assignee_id = 3;
+  string sort_by = 4;
+  string sort_dir = 5;
+}
+
+message ResearchDesignProto {
+  bool found = 1;
+  string id = 2;
+  string research_id = 3;
+  string goal = 4;
+  string questions = 5;
+  string success_criteria = 6;
+  string user_stories = 7;
+}
+
+message InsightProto {
+  string id = 1;
+  string research_id = 2;
+  string text = 3;
+  string created_by = 4;
+  string created_at = 5;
+}
+
+message InsightListProto {
+  repeated InsightProto items = 1;
+}
+
+message ResearchNoteProto {
+  string id = 1;
+  string research_id = 2;
+  string text = 3;
+  string author_id = 4;
+  string created_at = 5;
+}
+
+message ResearchNoteListProto {
+  repeated ResearchNoteProto items = 1;
+}
+
+message CreateResearchRequest {
+  string hypothesis_id = 1;
+  string title = 2;
+  string research_type = 3;
+  string method = 4;
+  string target_audience = 5;
+  int32 sample_size = 6;
+  string assignee_id = 7;
+  string goal = 8;
+  string questions = 9;
+  string success_criteria = 10;
+  string user_stories = 11;
+}
+
+message AddResearchTextRequest {
+  string research_id = 1;
+  string user_id = 2;
+  string text = 3;
+}
+
+service ResearchService {
+  rpc GetResearch(GetResearchRequest) returns (ResearchProto);
+  rpc ListResearches(ListResearchesRequest) returns (ResearchListProto);
+  rpc GetDesign(GetResearchRequest) returns (ResearchDesignProto);
+  rpc ListInsights(GetResearchRequest) returns (InsightListProto);
+  rpc ListNotes(GetResearchRequest) returns (ResearchNoteListProto);
+  rpc CreateResearch(CreateResearchRequest) returns (ResearchProto);
+  rpc AddNote(AddResearchTextRequest) returns (ResearchNoteProto);
+  rpc AddInsight(AddResearchTextRequest) returns (InsightProto);
+  rpc CompleteResearch(GetResearchRequest) returns (ResearchProto);
+  rpc MarkCompleted(GetResearchRequest) returns (ResearchProto);
+}
+
+message ReportProto {
+  bool found = 1;
+  string id = 2;
+  string research_id = 3;
+  string conclusion = 4;
+  string recommendations = 5;
+  string file_url = 6;
+  string created_at = 7;
+}
+
+message PublishReportRequest {
+  string research_id = 1;
+  string conclusion = 2;
+  string recommendations = 3;
+  string file_url = 4;
+}
+
+service ReportService {
+  rpc GetReportByResearch(GetResearchRequest) returns (ReportProto);
+  rpc PublishReport(PublishReportRequest) returns (ReportProto);
+}
+
+message RoadmapItemProto {
+  string id = 1;
+  string hypothesis_id = 2;
+  string hypothesis_title = 3;
+  string start_date = 4;
+  string end_date = 5;
+  int32 duration = 6;
+  repeated string dependencies = 7;
+  string assignee_id = 8;
+}
+
+message RoadmapListProto {
+  repeated RoadmapItemProto items = 1;
+}
+
+message ListRoadmapRequest {
+  string sort_dir = 1;
+}
+
+message ScheduleRoadmapRequest {
+  string hypothesis_id = 1;
+  string hypothesis_title = 2;
+  string start_date = 3;
+  string end_date = 4;
+  repeated string dependencies = 5;
+  string assignee_id = 6;
+}
+
+service RoadmapService {
+  rpc ListRoadmap(ListRoadmapRequest) returns (RoadmapListProto);
+  rpc ScheduleItem(ScheduleRoadmapRequest) returns (RoadmapItemProto);
+}
+
+message DashboardMetricProto {
+  string id = 1;
+  string metric_type = 2;
+  string product_id = 3;
+  string period = 4;
+  double value = 5;
+}
+
+message DashboardMetricsListProto {
+  repeated DashboardMetricProto items = 1;
+}
+
+message GetDashboardMetricsRequest {
+  string product_id = 1;
+  string period = 2;
+}
+
+service AnalyticsService {
+  rpc GetDashboardMetrics(GetDashboardMetricsRequest) returns (DashboardMetricsListProto);
+}
+
+message ProductProto {
+  string id = 1;
+  string name = 2;
+  string category = 3;
+  string status = 4;
+  string description = 5;
+  string owner_id = 6;
+}
+
+message ProductListProto {
+  repeated ProductProto items = 1;
+}
+
+message GetProductRequest {
+  string product_id = 1;
+}
+
+message TeamProto {
+  string id = 1;
+  string name = 2;
+  string role = 3;
+  string product_id = 4;
+  repeated string member_ids = 5;
+}
+
+message TeamListProto {
+  repeated TeamProto items = 1;
+}
+
+service ProductService {
+  rpc GetProduct(GetProductRequest) returns (ProductProto);
+  rpc ListProducts(Empty) returns (ProductListProto);
+  rpc ListTeams(GetProductRequest) returns (TeamListProto);
+}
+
+message UserProto {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  string role = 4;
+  string team_id = 5;
+  string expertise = 6;
+}
+
+message UserListProto {
+  repeated UserProto items = 1;
+}
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message CheckPermissionRequest {
+  string user_id = 1;
+  string action = 2;
+}
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (UserProto);
+  rpc ListUsers(Empty) returns (UserListProto);
+  rpc CheckPermission(CheckPermissionRequest) returns (UserProto);
+}
+
+message NotificationProto {
+  string id = 1;
+  string user_id = 2;
+  string type = 3;
+  string message = 4;
+  string entity_type = 5;
+  string entity_id = 6;
+  bool is_read = 7;
+  string created_at = 8;
+}
+
+message NotificationListProto {
+  repeated NotificationProto items = 1;
+}
+
+message ListNotificationsRequest {
+  string user_id = 1;
+  bool unread_only = 2;
+}
+
+message CreateNotificationRequest {
+  string user_id = 1;
+  string message = 2;
+  string entity_type = 3;
+  string entity_id = 4;
+  string notif_type = 5;
+}
+
+message MarkReadRequest {
+  string notification_id = 1;
+}
+
+service NotificationService {
+  rpc ListNotifications(ListNotificationsRequest) returns (NotificationListProto);
+  rpc CreateNotification(CreateNotificationRequest) returns (NotificationProto);
+  rpc MarkRead(MarkReadRequest) returns (NotificationProto);
+}
+
+message IdeaProto {
+  string id = 1;
+  string product_id = 2;
+  string title = 3;
+  string description = 4;
+  string expected_effect = 5;
+  string category = 6;
+  string author_name = 7;
+  string status = 8;
+  string hypothesis_id = 9;
+}
+
+message IdeaListProto {
+  repeated IdeaProto items = 1;
+}
+
+message SubmitIdeaRequest {
+  string product_id = 1;
+  string title = 2;
+  string description = 3;
+  string expected_effect = 4;
+  string category = 5;
+  string author_name = 6;
+  string hypothesis_id = 7;
+}
+
+service IdeaPortalService {
+  rpc ListIdeas(Empty) returns (IdeaListProto);
+  rpc SubmitIdea(SubmitIdeaRequest) returns (IdeaProto);
+}
+
+message AttachmentProto {
+  string id = 1;
+  string entity_type = 2;
+  string entity_id = 3;
+  string file_name = 4;
+  string file_url = 5;
+  int32 file_size = 6;
+  string uploaded_by = 7;
+}
+
+message AttachmentListProto {
+  repeated AttachmentProto items = 1;
+}
+
+service FileStorageService {
+  rpc ListAttachments(ListCommentsRequest) returns (AttachmentListProto);
+}
+
+message ActivityLogProto {
+  string id = 1;
+  string entity_type = 2;
+  string entity_id = 3;
+  string user_id = 4;
+  string action = 5;
+  string old_value = 6;
+  string new_value = 7;
+  string timestamp = 8;
+}
+
+message ActivityLogListProto {
+  repeated ActivityLogProto items = 1;
+}
+
+message RecordActionRequest {
+  string entity_type = 1;
+  string entity_id = 2;
+  string user_id = 3;
+  string action = 4;
+  string old_value = 5;
+  string new_value = 6;
+}
+
+service AuditService {
+  rpc ListActivityLogs(ListCommentsRequest) returns (ActivityLogListProto);
+  rpc RecordAction(RecordActionRequest) returns (ActivityLogProto);
+}
+
+message BacklogTaskProto {
+  bool found = 1;
+  string id = 2;
+  string hypothesis_id = 3;
+  string idempotency_key = 4;
+  string external_system = 5;
+  string external_key = 6;
+  string external_url = 7;
+  string status = 8;
+  string synced_at = 9;
+}
+
+message CreateExternalTaskRequest {
+  string hypothesis_id = 1;
+  string idempotency_key = 2;
+}
+
+service IntegrationService {
+  rpc GetBacklogTask(GetHypothesisRequest) returns (BacklogTaskProto);
+  rpc CreateExternalTask(CreateExternalTaskRequest) returns (BacklogTaskProto);
+}
+
+message AuthUserProto {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  string role = 4;
+  string created_at = 5;
+}
+
+message AuthTokenProto {
+  string access_token = 1;
+  string token_type = 2;
+  string session_id = 3;
+  int32 expires_in = 4;
+  AuthUserProto user = 5;
+}
+
+message AuthenticatedUserProto {
+  string user_id = 1;
+  string name = 2;
+  string email = 3;
+  string role = 4;
+  string session_id = 5;
+}
+
+message RegisterRequest {
+  string name = 1;
+  string email = 2;
+  string password = 3;
+  string role = 4;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message TokenRequest {
+  string token = 1;
+}
+
+message LogoutResponse {
+  bool success = 1;
+}
+
+service AuthService {
+  rpc Register(RegisterRequest) returns (AuthTokenProto);
+  rpc Login(LoginRequest) returns (AuthTokenProto);
+  rpc VerifyTokenAndSession(TokenRequest) returns (AuthenticatedUserProto);
+  rpc Logout(TokenRequest) returns (LogoutResponse);
+}

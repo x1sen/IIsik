@@ -15,8 +15,8 @@ def get_db_path(db_filename: str) -> Path:
     return base_dir / db_filename
 
 
-def connect_sqlite(db_path: Path | str) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+def connect_sqlite(db_path: Path | str, check_same_thread: bool = False) -> sqlite3.Connection:
+    conn = sqlite3.connect(str(db_path), check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn

@@ -44,3 +44,6 @@ class RoadmapService:
             assignee_id=assignee_id,
         )
         return self._repo.save_item(item)
+
+    def update_title_cache(self, hypothesis_id: str, title: str) -> None:
+        self._repo.upsert_title_cache(hypothesis_id, title)

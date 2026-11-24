@@ -1,17 +1,15 @@
-# Product Discovery Platform (ЛР № 3, ЛР № 4 и ЛР № 5)
+# Product Discovery Platform (ЛР № 6)
 
-Реализация распределённой системы управления продуктовыми гипотезами и исследованиями на базе архитектуры из ЛР № 1 и ЛР № 2 с системой безопасности на базе **Auth Service**, **JWT**, **Redis** и **RBAC**.
+Интегрированная распределённая система с межсервисным взаимодействием на базе **gRPC** (**protobuf**) и событийным обменом через **Apache Kafka** (**Producer** и **Consumer**).
 
 ## Структура проекта
 
-- **gateway/** — внешний слой GraphQL API (**FastAPI** + **Strawberry GraphQL**):
-  - **app.py** — точка входа, извлечение **Authorization: Bearer** и подключение маршрутов **/graphql** и **/auth**;
-  - **security.py** — проверка JWT, Redis-сессии и ролей (**require_auth**);
-  - **types.py**, **resolvers.py**, **schema.py** — защищённые операции **Query** и **Mutation**, а также публичные **register**, **login**, **logout**;
-  - **clients/interfaces.py**, **clients/mocks.py** — абстракции и mock-клиенты сервисов (включая **AuthClient**).
-- **services/** — 12 доменных микросервисов с изолированными БД SQLite, координатор **business_operations.py** и **auth_service/** (**config.py**, **models.py**, **repository.py**, **seed.py**, **session_store.py**, **service.py**, **rest_api.py**).
-- **shared/** — исключения (**EntityNotFoundError**, **ValidationError**, **BusinessRuleError**, **AuthenticationError**, **AuthorizationError**) и **db.py**.
-- **tests/** — тесты сервисов, GraphQL API, бизнес-операций и безопасности (**test_security_auth.py**).
+- **protos/** — protobuf-контракты (**platform.proto**) и сгенерированные модули (**platform_pb2.py**, **platform_pb2_grpc.py**) для всех 13 сервисов.
+- **grpc_layer/** — gRPC-серверы внутренних сервисов (**server.py**) и конвертеры protobuf-сообщений (**converters.py**).
+- **kafka_layer/** — конверт событий и топики (**events.py**), **KafkaEventProducer** (**producer.py**) и **KafkaEventConsumer** с обработчиками для **AnalyticsService**, **RoadmapService**, **NotificationService** и **AuditService** (**consumer.py**).
+- **gateway/clients/** — абстрактные интерфейсы (**interfaces.py**) и реальные gRPC-клиенты (**grpc_clients.py**), заменившие mock-заглушки.
+- **services/** — внутренние микросервисы с изолированными БД SQLite и координатор сквозных сценариев **business_operations.py**, использующий gRPC и публикацию событий в Kafka.
+- **tests/** — тесты gRPC-вызовов и событийного взаимодействия через Kafka (**test_grpc_and_kafka.py**).
 
 ## Запуск
 

@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from gateway.clients.mocks import build_mock_clients
+from gateway.clients.grpc_clients import build_grpc_clients
 from shared.exceptions import EntityNotFoundError, ValidationError
 
 
 @pytest.fixture()
 def clients(tmp_path, monkeypatch):
     monkeypatch.setenv("PDP_DATA_DIR", str(tmp_path))
-    return build_mock_clients()
+    c = build_grpc_clients()
+    yield c
+    c.shutdown()
 
 
 def test_hypothesis_service_read_and_duplicates(clients):

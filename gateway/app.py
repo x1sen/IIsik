@@ -1,11 +1,11 @@
-"""Точка входа FastAPI + Strawberry GraphQL Gateway + REST Auth Service."""
+"""Точка входа FastAPI + Strawberry GraphQL Gateway (gRPC + Kafka)."""
 
 from __future__ import annotations
 
 from fastapi import FastAPI, Request
 from strawberry.fastapi import GraphQLRouter
 
-from gateway.clients.mocks import ServiceClients, build_mock_clients
+from gateway.clients.grpc_clients import ServiceClients, build_grpc_clients
 from gateway.config import GatewayConfig
 from gateway.schema import schema
 from services.auth_service.rest_api import build_auth_router
@@ -13,7 +13,7 @@ from services.auth_service.rest_api import build_auth_router
 
 def create_app(clients: ServiceClients | None = None) -> FastAPI:
     cfg = GatewayConfig()
-    active_clients = clients or build_mock_clients()
+    active_clients = clients or build_grpc_clients()
 
     def get_context(request: Request) -> dict:
         auth_header = request.headers.get("Authorization", "")
@@ -29,7 +29,7 @@ def create_app(clients: ServiceClients | None = None) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok", "mode": "mock-clients" if cfg.use_mock_clients else "grpc"}
+        return {"status": "ok", "mode": "grpc+kafka"}
 
     return app
 

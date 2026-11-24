@@ -6,3 +6,7 @@ pytest>=8.0.0
 pyjwt>=2.8.0
 redis>=5.0.0
 fakeredis>=2.20.0
+grpcio>=1.60.0
+grpcio-tools>=1.60.0
+protobuf>=5.0.0
+kafka-python-ng>=2.2.0

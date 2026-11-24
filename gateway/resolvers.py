@@ -7,7 +7,7 @@ from typing import Optional
 import strawberry
 from strawberry.types import Info
 
-from gateway.clients.mocks import ServiceClients
+from gateway.clients.grpc_clients import ServiceClients
 from gateway.security import (
     AGILE_OR_ADMIN,
     ALL_ROLES,

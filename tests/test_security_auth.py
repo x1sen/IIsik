@@ -9,16 +9,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import create_app
-from gateway.clients.mocks import build_mock_clients
+from gateway.clients.grpc_clients import build_grpc_clients
 
 
 @pytest.fixture()
 def secured_env(tmp_path, monkeypatch):
     monkeypatch.setenv("PDP_DATA_DIR", str(tmp_path))
     redis_client = fakeredis.FakeRedis(decode_responses=True)
-    clients = build_mock_clients(redis_client=redis_client, session_ttl_seconds=60)
+    clients = build_grpc_clients(redis_client=redis_client, session_ttl_seconds=60)
     app = create_app(clients=clients)
-    return TestClient(app), clients, redis_client
+    yield TestClient(app), clients, redis_client
+    clients.shutdown()
 
 
 def _gql(tc: TestClient, query: str, token: str | None = None) -> dict:
@@ -66,7 +67,7 @@ def test_register_login_password_hash_and_me(secured_env):
     sid = payload["sessionId"]
 
     assert redis_client.get(f"session:{sid}") is not None
-    stored_user = clients.auth_service._repo.get_by_email("novikov@bank.local")
+    stored_user = clients.registry.auth._repo.get_by_email("novikov@bank.local")
     assert stored_user is not None
     assert stored_user.password_hash != "secret_password"
     assert stored_user.password_hash.startswith("pbkdf2_sha256$")
@@ -85,23 +86,25 @@ def test_register_login_password_hash_and_me(secured_env):
 def test_jwt_rejected_when_redis_session_missing_or_expired(tmp_path, monkeypatch):
     monkeypatch.setenv("PDP_DATA_DIR", str(tmp_path))
     redis_client = fakeredis.FakeRedis(decode_responses=True)
-    clients = build_mock_clients(redis_client=redis_client, session_ttl_seconds=1)
+    clients = build_grpc_clients(redis_client=redis_client, session_ttl_seconds=1)
     tc = TestClient(create_app(clients=clients))
+    try:
+        login_res = _gql(
+            tc,
+            'mutation { login(input: { email: "smirnov@bank.local", password: "pm_pass123" }) { accessToken sessionId } }',
+        )
+        assert "errors" not in login_res
+        token = login_res["data"]["login"]["accessToken"]
 
-    login_res = _gql(
-        tc,
-        'mutation { login(input: { email: "smirnov@bank.local", password: "pm_pass123" }) { accessToken sessionId } }',
-    )
-    assert "errors" not in login_res
-    token = login_res["data"]["login"]["accessToken"]
+        ok_res = _gql(tc, "query { me { email } }", token=token)
+        assert "errors" not in ok_res
 
-    ok_res = _gql(tc, "query { me { email } }", token=token)
-    assert "errors" not in ok_res
-
-    time.sleep(1.2)
-    expired_res = _gql(tc, "query { me { email } }", token=token)
-    assert "errors" in expired_res
-    assert "сессия" in expired_res["errors"][0]["message"].lower() or "истёк" in expired_res["errors"][0]["message"].lower()
+        time.sleep(1.2)
+        expired_res = _gql(tc, "query { me { email } }", token=token)
+        assert "errors" in expired_res
+        assert "сессия" in expired_res["errors"][0]["message"].lower() or "истёк" in expired_res["errors"][0]["message"].lower()
+    finally:
+        clients.shutdown()
 
 
 def test_logout_invalidates_redis_session_for_valid_jwt(secured_env):

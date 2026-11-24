@@ -86,3 +86,14 @@ class RoadmapRepository:
         )
         self._conn.commit()
         return item
+
+    def upsert_title_cache(self, hypothesis_id: str, title: str) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO hypothesis_title_cache (hypothesis_id, title)
+            VALUES (?, ?)
+            ON CONFLICT(hypothesis_id) DO UPDATE SET title = excluded.title
+            """,
+            (hypothesis_id, title),
+        )
+        self._conn.commit()
