@@ -1,30 +1,50 @@
-"""GraphQL Schema (Query для получения данных)."""
+"""GraphQL Schema (Query и Mutation для бизнес-операций и обработки данных)."""
 
 import strawberry
 
 from gateway.resolvers import (
     resolve_activity_logs,
+    resolve_add_comment,
+    resolve_add_insight,
+    resolve_add_research_note,
+    resolve_apply_research_result,
+    resolve_calculate_rice,
+    resolve_create_hypothesis,
+    resolve_create_research,
     resolve_dashboard_metrics,
+    resolve_export_to_backlog,
     resolve_find_duplicate_hypotheses,
     resolve_hypotheses,
+    resolve_hypotheses_summary,
     resolve_hypothesis,
     resolve_ideas,
+    resolve_mark_notification_read,
     resolve_my_notifications,
     resolve_product,
     resolve_products,
+    resolve_publish_report,
     resolve_research,
     resolve_researches,
     resolve_roadmap,
+    resolve_schedule_on_roadmap,
+    resolve_submit_idea,
     resolve_users,
 )
 from gateway.types import (
     ActivityLogType,
+    BacklogTaskType,
+    CommentType,
     DashboardMetricType,
     DuplicateCandidateType,
+    HypothesesSummaryType,
     HypothesisType,
     IdeaType,
+    InsightType,
     NotificationType,
     ProductType,
+    RICEScoreType,
+    ReportType,
+    ResearchNoteType,
     ResearchType,
     RoadmapItemType,
     UserType,
@@ -35,6 +55,7 @@ from gateway.types import (
 class Query:
     hypothesis: HypothesisType = strawberry.field(resolver=resolve_hypothesis)
     hypotheses: list[HypothesisType] = strawberry.field(resolver=resolve_hypotheses)
+    hypotheses_summary: HypothesesSummaryType = strawberry.field(resolver=resolve_hypotheses_summary)
     find_duplicate_hypotheses: list[DuplicateCandidateType] = strawberry.field(
         resolver=resolve_find_duplicate_hypotheses
     )
@@ -54,4 +75,24 @@ class Query:
     activity_logs: list[ActivityLogType] = strawberry.field(resolver=resolve_activity_logs)
 
 
-schema = strawberry.Schema(query=Query)
+@strawberry.type
+class Mutation:
+    create_hypothesis: HypothesisType = strawberry.field(resolver=resolve_create_hypothesis)
+    calculate_rice: RICEScoreType = strawberry.field(
+        name="calculateRICE", resolver=resolve_calculate_rice
+    )
+    apply_research_result: HypothesisType = strawberry.field(resolver=resolve_apply_research_result)
+    export_to_backlog: BacklogTaskType = strawberry.field(resolver=resolve_export_to_backlog)
+    create_research: ResearchType = strawberry.field(resolver=resolve_create_research)
+    add_research_note: ResearchNoteType = strawberry.field(resolver=resolve_add_research_note)
+    add_insight: InsightType = strawberry.field(resolver=resolve_add_insight)
+    publish_report: ReportType = strawberry.field(resolver=resolve_publish_report)
+    schedule_on_roadmap: RoadmapItemType = strawberry.field(resolver=resolve_schedule_on_roadmap)
+    submit_idea: IdeaType = strawberry.field(resolver=resolve_submit_idea)
+    add_comment: CommentType = strawberry.field(resolver=resolve_add_comment)
+    mark_notification_read: NotificationType = strawberry.field(
+        resolver=resolve_mark_notification_read
+    )
+
+
+schema = strawberry.Schema(query=Query, mutation=Mutation)

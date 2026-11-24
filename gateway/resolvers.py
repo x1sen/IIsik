@@ -10,25 +10,55 @@ from strawberry.types import Info
 from gateway.clients.mocks import ServiceClients
 from gateway.types import (
     ActivityLogType,
+    AddCommentInput,
+    AddInsightInput,
+    AddResearchNoteInput,
+    ApplyResearchResultInput,
+    BacklogTaskType,
+    CalculateRICEInput,
+    CommentType,
+    CreateHypothesisInput,
+    CreateReportInput,
+    CreateResearchInput,
+    CreateRoadmapItemInput,
     DashboardMetricType,
     DuplicateCandidateType,
+    ExportToBacklogInput,
     FindDuplicatesInput,
+    HypothesesSummaryType,
+    HypothesisFilterInput,
+    HypothesisSortInput,
     HypothesisStatus,
     HypothesisType,
     IdeaType,
+    InsightType,
     NotificationType,
     Priority,
+    PriorityCountType,
     ProductType,
+    RICEScoreType,
+    ReportType,
+    ResearchFilterInput,
+    ResearchNoteType,
+    ResearchSortInput,
     ResearchStatus,
     ResearchType,
     RoadmapItemType,
+    SortDirection,
+    StatusCountType,
+    SubmitIdeaInput,
     UserRole,
     UserType,
 )
+from services.business_operations import BusinessOperations
 
 
 def _clients(info: Info) -> ServiceClients:
     return info.context["clients"]
+
+
+def _ops(info: Info) -> BusinessOperations:
+    return BusinessOperations(_clients(info))
 
 
 def _map_hypothesis(h) -> HypothesisType:
@@ -67,14 +97,37 @@ def resolve_hypothesis(info: Info, id: strawberry.ID) -> HypothesisType:
 
 def resolve_hypotheses(
     info: Info,
-    product_id: Optional[strawberry.ID] = None,
-    status: Optional[HypothesisStatus] = None,
+    filter: Optional[HypothesisFilterInput] = None,
+    sort: Optional[HypothesisSortInput] = None,
 ) -> list[HypothesisType]:
     items = _clients(info).hypothesis.list_hypotheses(
-        product_id=str(product_id) if product_id else None,
-        status=status.value if status else None,
+        product_id=str(filter.product_id) if filter and filter.product_id else None,
+        status=filter.status.value if filter and filter.status else None,
+        priority=filter.priority.value if filter and filter.priority else None,
+        owner_id=str(filter.owner_id) if filter and filter.owner_id else None,
+        min_rice_score=filter.min_rice_score if filter else None,
+        search=filter.search if filter else None,
+        sort_by=sort.field.value if sort else "created_at",
+        sort_dir=sort.direction.value if sort else "DESC",
     )
     return [_map_hypothesis(h) for h in items]
+
+
+def resolve_hypotheses_summary(
+    info: Info, product_id: Optional[strawberry.ID] = None
+) -> HypothesesSummaryType:
+    s = _clients(info).hypothesis.get_summary(
+        product_id=str(product_id) if product_id else None
+    )
+    return HypothesesSummaryType(
+        total_count=s.total_count,
+        by_status=[StatusCountType(status=x.status, count=x.count) for x in s.by_status],
+        by_priority=[PriorityCountType(priority=x.priority, count=x.count) for x in s.by_priority],
+        avg_rice_score=s.avg_rice_score,
+        max_rice_score=s.max_rice_score,
+        confirmed_rate=s.confirmed_rate,
+        in_backlog_count=s.in_backlog_count,
+    )
 
 
 def resolve_find_duplicate_hypotheses(
@@ -102,16 +155,24 @@ def resolve_research(info: Info, id: strawberry.ID) -> ResearchType:
 
 
 def resolve_researches(
-    info: Info, hypothesis_id: Optional[strawberry.ID] = None
+    info: Info,
+    filter: Optional[ResearchFilterInput] = None,
+    sort: Optional[ResearchSortInput] = None,
 ) -> list[ResearchType]:
     items = _clients(info).research.list_researches(
-        hypothesis_id=str(hypothesis_id) if hypothesis_id else None
+        hypothesis_id=str(filter.hypothesis_id) if filter and filter.hypothesis_id else None,
+        status=filter.status.value if filter and filter.status else None,
+        assignee_id=str(filter.assignee_id) if filter and filter.assignee_id else None,
+        sort_by=sort.field.value if sort else "start_date",
+        sort_dir=sort.direction.value if sort else "DESC",
     )
     return [_map_research(r) for r in items]
 
 
-def resolve_roadmap(info: Info) -> list[RoadmapItemType]:
-    items = _clients(info).roadmap.list_roadmap()
+def resolve_roadmap(
+    info: Info, sort_direction: SortDirection = SortDirection.ASC
+) -> list[RoadmapItemType]:
+    items = _clients(info).roadmap.list_roadmap(sort_dir=sort_direction.value)
     return [
         RoadmapItemType(
             id=strawberry.ID(i.id),
@@ -247,9 +308,6 @@ def resolve_activity_logs(
         )
         for l in items
     ]
-
-
-# ==================== MUTATION RESOLVERS ====================
 
 
 def resolve_create_hypothesis(info: Info, input: CreateHypothesisInput) -> HypothesisType:
