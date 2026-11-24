@@ -1,19 +1,17 @@
-# Product Discovery Platform (ЛР № 3 и ЛР № 4)
+# Product Discovery Platform (ЛР № 3, ЛР № 4 и ЛР № 5)
 
-Реализация распределённой системы управления продуктовыми гипотезами и исследованиями на базе архитектуры из ЛР № 1 и ЛР № 2.
+Реализация распределённой системы управления продуктовыми гипотезами и исследованиями на базе архитектуры из ЛР № 1 и ЛР № 2 с системой безопасности на базе **Auth Service**, **JWT**, **Redis** и **RBAC**.
 
 ## Структура проекта
 
 - **gateway/** — внешний слой GraphQL API (**FastAPI** + **Strawberry GraphQL**):
-  - **config.py** — конфигурация шлюза;
-  - **types.py** — GraphQL **type**, **enum**, **input** и вложенные резолверы;
-  - **resolvers.py** — тонкие резолверы **Query** и **Mutation** (без бизнес-логики);
-  - **schema.py** — корневая схема **Query** и **Mutation**;
-  - **clients/interfaces.py** — абстрактные интерфейсы клиентов сервисов;
-  - **clients/mocks.py** — mock-реализации клиентов (без реальных сетевых gRPC-вызовов).
-- **services/** — 12 изолированных микросервисов (**hypothesis_service**, **research_service**, **report_service**, **roadmap_service**, **analytics_service**, **product_service**, **user_service**, **notification_service**, **idea_portal_service**, **file_storage_service**, **audit_service**, **integration_service**), каждый со своей БД SQLite и слоями **config.py**, **models.py**, **repository.py**, **service.py**, **seed.py**, а также координатор сквозных сценариев **business_operations.py**.
-- **shared/** — общие исключения (**EntityNotFoundError**, **ValidationError**, **BusinessRuleError**) и помощник подключения к SQLite.
-- **tests/** — модульные и интеграционные тесты сервисов и GraphQL API.
+  - **app.py** — точка входа, извлечение **Authorization: Bearer** и подключение маршрутов **/graphql** и **/auth**;
+  - **security.py** — проверка JWT, Redis-сессии и ролей (**require_auth**);
+  - **types.py**, **resolvers.py**, **schema.py** — защищённые операции **Query** и **Mutation**, а также публичные **register**, **login**, **logout**;
+  - **clients/interfaces.py**, **clients/mocks.py** — абстракции и mock-клиенты сервисов (включая **AuthClient**).
+- **services/** — 12 доменных микросервисов с изолированными БД SQLite, координатор **business_operations.py** и **auth_service/** (**config.py**, **models.py**, **repository.py**, **seed.py**, **session_store.py**, **service.py**, **rest_api.py**).
+- **shared/** — исключения (**EntityNotFoundError**, **ValidationError**, **BusinessRuleError**, **AuthenticationError**, **AuthorizationError**) и **db.py**.
+- **tests/** — тесты сервисов, GraphQL API, бизнес-операций и безопасности (**test_security_auth.py**).
 
 ## Запуск
 

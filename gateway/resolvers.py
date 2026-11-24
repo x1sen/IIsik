@@ -8,12 +8,23 @@ import strawberry
 from strawberry.types import Info
 
 from gateway.clients.mocks import ServiceClients
+from gateway.security import (
+    AGILE_OR_ADMIN,
+    ALL_ROLES,
+    CX_OR_ADMIN,
+    PM_CX_OR_ADMIN,
+    PM_OR_ADMIN,
+    extract_bearer_token,
+    require_auth,
+)
 from gateway.types import (
     ActivityLogType,
     AddCommentInput,
     AddInsightInput,
     AddResearchNoteInput,
     ApplyResearchResultInput,
+    AuthPayloadType,
+    AuthUserType,
     BacklogTaskType,
     CalculateRICEInput,
     CommentType,
@@ -49,6 +60,8 @@ from gateway.types import (
     SubmitIdeaInput,
     UserRole,
     UserType,
+    LoginInput,
+    RegisterInput,
 )
 from services.business_operations import BusinessOperations
 
@@ -90,7 +103,60 @@ def _map_research(r) -> ResearchType:
     )
 
 
+def resolve_me(info: Info) -> AuthUserType:
+    user = require_auth(info, ALL_ROLES)
+    return AuthUserType(
+        id=strawberry.ID(user.user_id),
+        name=user.name,
+        email=user.email,
+        role=UserRole(user.role),
+    )
+
+
+def resolve_register(info: Info, input: RegisterInput) -> AuthPayloadType:
+    res = _clients(info).auth.register(
+        name=input.name,
+        email=input.email,
+        password=input.password,
+        role=input.role.value,
+    )
+    return AuthPayloadType(
+        access_token=res.access_token,
+        token_type=res.token_type,
+        session_id=res.session_id,
+        expires_in=res.expires_in,
+        user=AuthUserType(
+            id=strawberry.ID(res.user.id),
+            name=res.user.name,
+            email=res.user.email,
+            role=UserRole(res.user.role),
+        ),
+    )
+
+
+def resolve_login(info: Info, input: LoginInput) -> AuthPayloadType:
+    res = _clients(info).auth.login(email=input.email, password=input.password)
+    return AuthPayloadType(
+        access_token=res.access_token,
+        token_type=res.token_type,
+        session_id=res.session_id,
+        expires_in=res.expires_in,
+        user=AuthUserType(
+            id=strawberry.ID(res.user.id),
+            name=res.user.name,
+            email=res.user.email,
+            role=UserRole(res.user.role),
+        ),
+    )
+
+
+def resolve_logout(info: Info) -> bool:
+    token = extract_bearer_token(info)
+    return _clients(info).auth.logout(token)
+
+
 def resolve_hypothesis(info: Info, id: strawberry.ID) -> HypothesisType:
+    require_auth(info, ALL_ROLES)
     h = _clients(info).hypothesis.get_hypothesis(str(id))
     return _map_hypothesis(h)
 
@@ -100,6 +166,7 @@ def resolve_hypotheses(
     filter: Optional[HypothesisFilterInput] = None,
     sort: Optional[HypothesisSortInput] = None,
 ) -> list[HypothesisType]:
+    require_auth(info, ALL_ROLES)
     items = _clients(info).hypothesis.list_hypotheses(
         product_id=str(filter.product_id) if filter and filter.product_id else None,
         status=filter.status.value if filter and filter.status else None,
@@ -116,6 +183,7 @@ def resolve_hypotheses(
 def resolve_hypotheses_summary(
     info: Info, product_id: Optional[strawberry.ID] = None
 ) -> HypothesesSummaryType:
+    require_auth(info, ALL_ROLES)
     s = _clients(info).hypothesis.get_summary(
         product_id=str(product_id) if product_id else None
     )
@@ -133,6 +201,7 @@ def resolve_hypotheses_summary(
 def resolve_find_duplicate_hypotheses(
     info: Info, input: FindDuplicatesInput
 ) -> list[DuplicateCandidateType]:
+    require_auth(info, ALL_ROLES)
     items = _clients(info).hypothesis.find_duplicate_hypotheses(
         title=input.title,
         description=input.description,
@@ -150,6 +219,7 @@ def resolve_find_duplicate_hypotheses(
 
 
 def resolve_research(info: Info, id: strawberry.ID) -> ResearchType:
+    require_auth(info, ALL_ROLES)
     r = _clients(info).research.get_research(str(id))
     return _map_research(r)
 
@@ -159,6 +229,7 @@ def resolve_researches(
     filter: Optional[ResearchFilterInput] = None,
     sort: Optional[ResearchSortInput] = None,
 ) -> list[ResearchType]:
+    require_auth(info, ALL_ROLES)
     items = _clients(info).research.list_researches(
         hypothesis_id=str(filter.hypothesis_id) if filter and filter.hypothesis_id else None,
         status=filter.status.value if filter and filter.status else None,
@@ -172,6 +243,7 @@ def resolve_researches(
 def resolve_roadmap(
     info: Info, sort_direction: SortDirection = SortDirection.ASC
 ) -> list[RoadmapItemType]:
+    require_auth(info, ALL_ROLES)
     items = _clients(info).roadmap.list_roadmap(sort_dir=sort_direction.value)
     return [
         RoadmapItemType(
@@ -193,6 +265,7 @@ def resolve_dashboard_metrics(
     product_id: Optional[strawberry.ID] = None,
     period: Optional[str] = None,
 ) -> list[DashboardMetricType]:
+    require_auth(info, ALL_ROLES)
     items = _clients(info).analytics.get_dashboard_metrics(
         product_id=str(product_id) if product_id else None,
         period=period,
@@ -210,10 +283,16 @@ def resolve_dashboard_metrics(
 
 
 def resolve_my_notifications(
-    info: Info, user_id: strawberry.ID, unread_only: bool = False
+    info: Info, user_id: Optional[strawberry.ID] = None, unread_only: bool = False
 ) -> list[NotificationType]:
+    current_user = require_auth(info, ALL_ROLES)
+    target_user_id = (
+        str(user_id)
+        if user_id and current_user.role == "ADMIN"
+        else current_user.user_id
+    )
     items = _clients(info).notification.list_notifications(
-        user_id=str(user_id), unread_only=unread_only
+        user_id=target_user_id, unread_only=unread_only
     )
     return [
         NotificationType(
@@ -230,6 +309,7 @@ def resolve_my_notifications(
 
 
 def resolve_products(info: Info) -> list[ProductType]:
+    require_auth(info, ALL_ROLES)
     items = _clients(info).product.list_products()
     return [
         ProductType(
@@ -245,6 +325,7 @@ def resolve_products(info: Info) -> list[ProductType]:
 
 
 def resolve_product(info: Info, id: strawberry.ID) -> ProductType:
+    require_auth(info, ALL_ROLES)
     p = _clients(info).product.get_product(str(id))
     return ProductType(
         id=strawberry.ID(p.id),
@@ -257,6 +338,7 @@ def resolve_product(info: Info, id: strawberry.ID) -> ProductType:
 
 
 def resolve_users(info: Info) -> list[UserType]:
+    require_auth(info, ALL_ROLES)
     items = _clients(info).user.list_users()
     return [
         UserType(
@@ -272,6 +354,7 @@ def resolve_users(info: Info) -> list[UserType]:
 
 
 def resolve_ideas(info: Info) -> list[IdeaType]:
+    require_auth(info, ALL_ROLES)
     items = _clients(info).idea_portal.list_ideas()
     return [
         IdeaType(
@@ -292,6 +375,7 @@ def resolve_ideas(info: Info) -> list[IdeaType]:
 def resolve_activity_logs(
     info: Info, entity_type: str, entity_id: strawberry.ID
 ) -> list[ActivityLogType]:
+    require_auth(info, AGILE_OR_ADMIN)
     items = _clients(info).audit.list_activity_logs(
         entity_type=entity_type, entity_id=str(entity_id)
     )
@@ -311,6 +395,7 @@ def resolve_activity_logs(
 
 
 def resolve_create_hypothesis(info: Info, input: CreateHypothesisInput) -> HypothesisType:
+    require_auth(info, ALL_ROLES)
     h = _ops(info).create_hypothesis(
         title=input.title,
         description=input.description,
@@ -325,13 +410,14 @@ def resolve_create_hypothesis(info: Info, input: CreateHypothesisInput) -> Hypot
 
 
 def resolve_calculate_rice(info: Info, input: CalculateRICEInput) -> RICEScoreType:
+    current_user = require_auth(info, {"PM", "AGILE_CENTER", "ADMIN"})
     s = _ops(info).calculate_rice(
         hypothesis_id=str(input.hypothesis_id),
         reach=input.reach,
         impact=input.impact,
         confidence=input.confidence,
         effort=input.effort,
-        user_id=str(input.user_id),
+        user_id=current_user.user_id,
     )
     return RICEScoreType(
         id=strawberry.ID(s.id),
@@ -344,19 +430,21 @@ def resolve_calculate_rice(info: Info, input: CalculateRICEInput) -> RICEScoreTy
 
 
 def resolve_apply_research_result(info: Info, input: ApplyResearchResultInput) -> HypothesisType:
+    current_user = require_auth(info, PM_CX_OR_ADMIN)
     h = _ops(info).apply_research_result(
         hypothesis_id=str(input.hypothesis_id),
         research_id=str(input.research_id),
         target_status=input.status.value,
-        user_id=str(input.user_id),
+        user_id=current_user.user_id,
     )
     return _map_hypothesis(h)
 
 
 def resolve_export_to_backlog(info: Info, input: ExportToBacklogInput) -> BacklogTaskType:
+    current_user = require_auth(info, PM_OR_ADMIN)
     t = _ops(info).export_to_backlog(
         hypothesis_id=str(input.hypothesis_id),
-        user_id=str(input.user_id),
+        user_id=current_user.user_id,
     )
     return BacklogTaskType(
         id=strawberry.ID(t.id),
@@ -370,6 +458,7 @@ def resolve_export_to_backlog(info: Info, input: ExportToBacklogInput) -> Backlo
 
 
 def resolve_create_research(info: Info, input: CreateResearchInput) -> ResearchType:
+    require_auth(info, CX_OR_ADMIN)
     r = _ops(info).create_research(
         hypothesis_id=str(input.hypothesis_id),
         title=input.title,
@@ -387,9 +476,10 @@ def resolve_create_research(info: Info, input: CreateResearchInput) -> ResearchT
 
 
 def resolve_add_research_note(info: Info, input: AddResearchNoteInput) -> ResearchNoteType:
+    current_user = require_auth(info, CX_OR_ADMIN)
     n = _ops(info).add_research_note(
         research_id=str(input.research_id),
-        author_id=str(input.author_id),
+        author_id=current_user.user_id,
         text=input.text,
     )
     return ResearchNoteType(
@@ -401,9 +491,10 @@ def resolve_add_research_note(info: Info, input: AddResearchNoteInput) -> Resear
 
 
 def resolve_add_insight(info: Info, input: AddInsightInput) -> InsightType:
+    current_user = require_auth(info, CX_OR_ADMIN)
     ins = _ops(info).add_insight(
         research_id=str(input.research_id),
-        created_by=str(input.created_by),
+        created_by=current_user.user_id,
         text=input.text,
     )
     return InsightType(
@@ -415,12 +506,13 @@ def resolve_add_insight(info: Info, input: AddInsightInput) -> InsightType:
 
 
 def resolve_publish_report(info: Info, input: CreateReportInput) -> ReportType:
+    current_user = require_auth(info, CX_OR_ADMIN)
     rep = _ops(info).publish_report(
         research_id=str(input.research_id),
         conclusion=input.conclusion,
         recommendations=input.recommendations,
         file_url=input.file_url,
-        author_id=str(input.author_id),
+        author_id=current_user.user_id,
     )
     return ReportType(
         id=strawberry.ID(rep.id),
@@ -433,6 +525,7 @@ def resolve_publish_report(info: Info, input: CreateReportInput) -> ReportType:
 
 
 def resolve_schedule_on_roadmap(info: Info, input: CreateRoadmapItemInput) -> RoadmapItemType:
+    require_auth(info, PM_OR_ADMIN)
     item = _ops(info).schedule_on_roadmap(
         hypothesis_id=str(input.hypothesis_id),
         start_date=input.start_date,
@@ -453,6 +546,7 @@ def resolve_schedule_on_roadmap(info: Info, input: CreateRoadmapItemInput) -> Ro
 
 
 def resolve_submit_idea(info: Info, input: SubmitIdeaInput) -> IdeaType:
+    require_auth(info, ALL_ROLES)
     idea = _ops(info).submit_idea(
         product_id=str(input.product_id),
         title=input.title,
@@ -480,10 +574,11 @@ def resolve_submit_idea(info: Info, input: SubmitIdeaInput) -> IdeaType:
 
 
 def resolve_add_comment(info: Info, input: AddCommentInput) -> CommentType:
+    current_user = require_auth(info, ALL_ROLES)
     c = _ops(info).add_comment(
         entity_type=input.entity_type.value,
         entity_id=str(input.entity_id),
-        author_id=str(input.author_id),
+        author_id=current_user.user_id,
         text=input.text,
     )
     return CommentType(
@@ -497,6 +592,7 @@ def resolve_add_comment(info: Info, input: AddCommentInput) -> CommentType:
 
 
 def resolve_mark_notification_read(info: Info, id: strawberry.ID) -> NotificationType:
+    require_auth(info, ALL_ROLES)
     n = _clients(info).notification.mark_read(str(id))
     return NotificationType(
         id=strawberry.ID(n.id),

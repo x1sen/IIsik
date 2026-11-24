@@ -13,7 +13,13 @@ from gateway.clients.mocks import build_mock_clients
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("PDP_DATA_DIR", str(tmp_path))
     app = create_app(clients=build_mock_clients())
-    return TestClient(app)
+    tc = TestClient(app)
+    login_resp = tc.post(
+        "/auth/login", json={"email": "orlova@bank.local", "password": "admin_pass123"}
+    )
+    assert login_resp.status_code == 200
+    tc.headers["Authorization"] = f"Bearer {login_resp.json()['access_token']}"
+    return tc
 
 
 def test_health_endpoint(client: TestClient):

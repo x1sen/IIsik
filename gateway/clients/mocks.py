@@ -8,6 +8,7 @@ from typing import Optional
 from gateway.clients.interfaces import (
     AnalyticsClient,
     AuditClient,
+    AuthClient,
     FileStorageClient,
     HypothesisClient,
     IdeaPortalClient,
@@ -27,6 +28,11 @@ from services.audit_service.config import AuditServiceConfig
 from services.audit_service.repository import AuditRepository
 from services.audit_service.seed import seed_audit_db
 from services.audit_service.service import AuditService
+from services.auth_service.config import AuthServiceConfig
+from services.auth_service.repository import AuthRepository
+from services.auth_service.seed import seed_auth_db
+from services.auth_service.service import AuthService
+from services.auth_service.session_store import RedisSessionStore, create_redis_client
 from services.file_storage_service.config import FileStorageServiceConfig
 from services.file_storage_service.repository import FileStorageRepository
 from services.file_storage_service.seed import seed_file_storage_db
@@ -416,6 +422,23 @@ class MockIntegrationClient(IntegrationClient):
         return self._svc.create_external_task(hypothesis_id, idempotency_key)
 
 
+class MockAuthClient(AuthClient):
+    def __init__(self, svc: AuthService) -> None:
+        self._svc = svc
+
+    def register(self, name: str, email: str, password: str, role: str = "PM"):
+        return self._svc.register(name=name, email=email, password=password, role=role)
+
+    def login(self, email: str, password: str):
+        return self._svc.login(email=email, password=password)
+
+    def verify_token_and_session(self, token: str):
+        return self._svc.verify_token_and_session(token=token)
+
+    def logout(self, token: str):
+        return self._svc.logout(token=token)
+
+
 @dataclass(frozen=True)
 class ServiceClients:
     hypothesis: HypothesisClient
@@ -430,10 +453,14 @@ class ServiceClients:
     file_storage: FileStorageClient
     audit: AuditClient
     integration: IntegrationClient
+    auth: AuthClient
+    auth_service: AuthService
 
 
-def build_mock_clients() -> ServiceClients:
-    """Инициализирует изолированные БД всех 12 сервисов, сидирует тестовые данные и возвращает mock-клиенты."""
+def build_mock_clients(
+    redis_client=None, session_ttl_seconds: Optional[int] = None
+) -> ServiceClients:
+    """Инициализирует изолированные БД всех сервисов, Redis-хранилище сессий и mock-клиенты."""
     h_conn = connect_sqlite(HypothesisServiceConfig().db_path)
     h_repo = HypothesisRepository(h_conn)
     seed_hypothesis_db(h_conn)
@@ -482,6 +509,18 @@ def build_mock_clients() -> ServiceClients:
     intg_repo = IntegrationRepository(intg_conn)
     seed_integration_db(intg_conn)
 
+    auth_cfg = AuthServiceConfig(
+        session_ttl_seconds=session_ttl_seconds
+        if session_ttl_seconds is not None
+        else AuthServiceConfig().session_ttl_seconds
+    )
+    auth_conn = connect_sqlite(auth_cfg.db_filename)
+    auth_repo = AuthRepository(auth_conn)
+    seed_auth_db(auth_conn)
+    r_client = redis_client if redis_client is not None else create_redis_client(auth_cfg.redis_url)
+    session_store = RedisSessionStore(r_client)
+    auth_svc = AuthService(auth_repo, session_store, config=auth_cfg)
+
     return ServiceClients(
         hypothesis=MockHypothesisClient(HypothesisService(h_repo)),
         research=MockResearchClient(ResearchService(r_repo)),
@@ -495,4 +534,6 @@ def build_mock_clients() -> ServiceClients:
         file_storage=MockFileStorageClient(FileStorageService(fs_repo)),
         audit=MockAuditClient(AuditService(aud_repo)),
         integration=MockIntegrationClient(IntegrationService(intg_repo)),
+        auth=MockAuthClient(auth_svc),
+        auth_service=auth_svc,
     )

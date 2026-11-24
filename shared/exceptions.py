@@ -20,3 +20,11 @@ class ValidationError(ServiceError):
 
 class BusinessRuleError(ServiceError):
     """Нарушение бизнес-правила или недопустимый переход состояния."""
+
+
+class AuthenticationError(ServiceError):
+    """Ошибка аутентификации или отсутствия активной сессии."""
+
+
+class AuthorizationError(ServiceError):
+    """Недостаточно прав для выполнения операции."""

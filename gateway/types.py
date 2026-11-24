@@ -683,3 +683,34 @@ class HypothesesSummaryType:
     max_rice_score: Optional[float]
     confirmed_rate: float
     in_backlog_count: int
+
+
+@strawberry.input
+class RegisterInput:
+    name: str
+    email: str
+    password: str
+    role: UserRole = UserRole.PM
+
+
+@strawberry.input
+class LoginInput:
+    email: str
+    password: str
+
+
+@strawberry.type
+class AuthUserType:
+    id: strawberry.ID
+    name: str
+    email: str
+    role: UserRole
+
+
+@strawberry.type
+class AuthPayloadType:
+    access_token: str
+    token_type: str
+    session_id: str
+    expires_in: int
+    user: AuthUserType

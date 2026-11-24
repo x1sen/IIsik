@@ -7,6 +7,7 @@ from typing import Optional
 
 from services.analytics_service.models import DashboardMetricModel
 from services.audit_service.models import ActivityLogModel
+from services.auth_service.models import AuthenticatedUserModel, AuthTokenModel
 from services.file_storage_service.models import AttachmentModel
 from services.hypothesis_service.models import (
     CommentModel,
@@ -274,3 +275,19 @@ class IntegrationClient(ABC):
 
     @abstractmethod
     def create_external_task(self, hypothesis_id: str, idempotency_key: str) -> BacklogTaskModel: ...
+
+
+class AuthClient(ABC):
+    @abstractmethod
+    def register(
+        self, name: str, email: str, password: str, role: str = "PM"
+    ) -> AuthTokenModel: ...
+
+    @abstractmethod
+    def login(self, email: str, password: str) -> AuthTokenModel: ...
+
+    @abstractmethod
+    def verify_token_and_session(self, token: str) -> AuthenticatedUserModel: ...
+
+    @abstractmethod
+    def logout(self, token: str) -> bool: ...

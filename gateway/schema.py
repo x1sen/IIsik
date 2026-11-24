@@ -1,4 +1,4 @@
-"""GraphQL Schema (Query и Mutation для бизнес-операций и обработки данных)."""
+"""GraphQL Schema (Query и Mutation с защитой JWT, Redis-сессиями и RBAC)."""
 
 import strawberry
 
@@ -18,11 +18,15 @@ from gateway.resolvers import (
     resolve_hypotheses_summary,
     resolve_hypothesis,
     resolve_ideas,
+    resolve_login,
+    resolve_logout,
     resolve_mark_notification_read,
+    resolve_me,
     resolve_my_notifications,
     resolve_product,
     resolve_products,
     resolve_publish_report,
+    resolve_register,
     resolve_research,
     resolve_researches,
     resolve_roadmap,
@@ -32,6 +36,8 @@ from gateway.resolvers import (
 )
 from gateway.types import (
     ActivityLogType,
+    AuthPayloadType,
+    AuthUserType,
     BacklogTaskType,
     CommentType,
     DashboardMetricType,
@@ -53,6 +59,7 @@ from gateway.types import (
 
 @strawberry.type
 class Query:
+    me: AuthUserType = strawberry.field(resolver=resolve_me)
     hypothesis: HypothesisType = strawberry.field(resolver=resolve_hypothesis)
     hypotheses: list[HypothesisType] = strawberry.field(resolver=resolve_hypotheses)
     hypotheses_summary: HypothesesSummaryType = strawberry.field(resolver=resolve_hypotheses_summary)
@@ -77,6 +84,9 @@ class Query:
 
 @strawberry.type
 class Mutation:
+    register: AuthPayloadType = strawberry.field(resolver=resolve_register)
+    login: AuthPayloadType = strawberry.field(resolver=resolve_login)
+    logout: bool = strawberry.field(resolver=resolve_logout)
     create_hypothesis: HypothesisType = strawberry.field(resolver=resolve_create_hypothesis)
     calculate_rice: RICEScoreType = strawberry.field(
         name="calculateRICE", resolver=resolve_calculate_rice
