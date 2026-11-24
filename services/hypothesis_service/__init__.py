@@ -1,0 +1,1 @@
+"""Пакет Hypothesis Service."""

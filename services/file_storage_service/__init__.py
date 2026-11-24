@@ -1,0 +1,1 @@
+"""Пакет File Storage Service."""

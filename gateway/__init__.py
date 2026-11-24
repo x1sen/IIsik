@@ -1,0 +1,1 @@
+"""Пакет GraphQL API Gateway."""

@@ -1,0 +1,1 @@
+"""Пакет Idea Portal Service."""
